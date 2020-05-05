@@ -49,6 +49,7 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
 @property (nonatomic, strong) dispatch_queue_t queue;
 @property (nonatomic, strong) NSString *bundleID;
 @property (nonatomic, assign) pid_t appProcessPID;
+@property (nonatomic, nullable) NSTask *recordVideoTask;
 
 @end
 
@@ -234,7 +235,7 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
         return nil;
     }
     [BPUtils printInfo:DEBUGINFO withString:@"BPTestBundleConnection Launching app: %@ with options %@", bundleID, options];
-    
+
     self.appProcessPID = [self.simulator.device launchApplicationWithID:bundleID options:options error:&error];
     self.bundleID = bundleID;
     if (error) {
@@ -277,6 +278,22 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
 
 - (id)_XCT_testCaseDidStartForTestClass:(NSString *)testClass method:(NSString *)method {
     [BPUtils printInfo:DEBUGINFO withString:@"BPTestBundleConnection_XCT_testCaseDidStartForTestClass: %@ and method: %@", testClass, method];
+
+    if (self.recordVideoTask != nil) {
+        [BPUtils printInfo:WARNING withString: @"Found dangling video recording task. Stopping it.\n Task arguments were: %@.", [[self.recordVideoTask arguments] componentsJoinedByString:@" "]];
+        [self.recordVideoTask interrupt];
+        self.recordVideoTask = nil;
+    }
+
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath:@"/usr/bin/xcrun"];
+    NSString *videoFileName = [NSString stringWithFormat:@"%@__%@.mov", testClass, method];
+    [task setArguments:@[@"simctl", @"io", [self.simulator UDID], @"recordVideo", videoFileName]];
+    NSLog(@"> %@ %@", [task launchPath], [[task arguments] componentsJoinedByString:@" "]);
+    self.recordVideoTask = task;
+    [task launch];
+    [BPUtils printInfo:INFO withString:@" Started recording video to file %@", videoFileName];
+
     return nil;
 }
 
