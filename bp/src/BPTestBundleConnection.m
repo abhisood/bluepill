@@ -285,14 +285,20 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
         self.recordVideoTask = nil;
     }
 
-    NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:@"/usr/bin/xcrun"];
-    NSString *videoFileName = [NSString stringWithFormat:@"%@__%@.mov", testClass, method];
-    [task setArguments:@[@"simctl", @"io", [self.simulator UDID], @"recordVideo", videoFileName]];
-    NSLog(@"> %@ %@", [task launchPath], [[task arguments] componentsJoinedByString:@" "]);
-    self.recordVideoTask = task;
-    [task launch];
-    [BPUtils printInfo:INFO withString:@" Started recording video to file %@", videoFileName];
+    if (self.config.videosDirectory) {
+        // TODO: Create folders 
+        NSString *videoFileName = [NSString stringWithFormat:@"%@__%@__%@.mov", self.simulator.UDID, testClass, method];
+        NSString *videoFilePath = [NSString stringWithFormat:@"%@/%@", self.config.videosDirectory, videoFileName];
+
+        NSTask *task = [[NSTask alloc] init];
+        [task setLaunchPath:@"/usr/bin/xcrun"];
+
+        [task setArguments:@[@"simctl", @"io", [self.simulator UDID], @"recordVideo", videoFilePath]];
+        NSLog(@"> %@ %@", [task launchPath], [[task arguments] componentsJoinedByString:@" "]);
+        self.recordVideoTask = task;
+        [task launch];
+        [BPUtils printInfo:INFO withString:@" Started recording video to file %@", videoFileName];
+    }
 
     return nil;
 }
