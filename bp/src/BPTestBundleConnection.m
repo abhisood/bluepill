@@ -49,7 +49,8 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
 @property (nonatomic, strong) dispatch_queue_t queue;
 @property (nonatomic, strong) NSString *bundleID;
 @property (nonatomic, assign) pid_t appProcessPID;
-@property (nonatomic, nullable) NSTask *recordVideoTask;
+// A dictionary of filenames to NSTasks
+@property (nonatomic, nullable) NSMutableDictionary<NSString *, NSTask *> *recordVideoTasks;
 
 @end
 
@@ -61,6 +62,7 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
         self.simulator = simulator;
         self.interface = interface;
         self.queue = dispatch_queue_create("com.linkedin.bluepill.connection.queue", DISPATCH_QUEUE_PRIORITY_DEFAULT);
+        self.recordVideoTasks = [[NSMutableDictionary alloc] init];
     }
     return self;
 }
@@ -279,33 +281,57 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
 - (id)_XCT_testCaseDidStartForTestClass:(NSString *)testClass method:(NSString *)method {
     [BPUtils printInfo:DEBUGINFO withString:@"BPTestBundleConnection_XCT_testCaseDidStartForTestClass: %@ and method: %@", testClass, method];
 
-    [self stopTestRecording];
-
-    NSString *videoFileName = [NSString stringWithFormat:@"%@__%@__%@.mov", self.simulator.UDID, testClass, method];
-    NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:@"/usr/bin/xcrun"];
-
-    [task setArguments:@[@"simctl", @"io", [self.simulator UDID], @"recordVideo", videoFileName]];
-    NSLog(@"> %@ %@", [task launchPath], [[task arguments] componentsJoinedByString:@" "]);
-    self.recordVideoTask = task;
-    [task launch];
-    [BPUtils printInfo:INFO withString:@" Started recording video to file %@", videoFileName];
-
+    [self startTestRecordingForTestClass:testClass method:method];
     return nil;
 }
 
-- (void)stopTestRecording
+static inline NSString* getVideoFileName(NSString* simUDID, NSString *testClass, NSString *method)
 {
-    if (self.recordVideoTask != nil) {
-        [BPUtils printInfo:WARNING withString: @"Found dangling video recording task. Stopping it.\n Task arguments were: %@.", [[self.recordVideoTask arguments] componentsJoinedByString:@" "]];
-        [self.recordVideoTask interrupt];
-        self.recordVideoTask = nil;
+    return [NSString stringWithFormat:@"%@__%@__%@.mov", simUDID, testClass, method];
+}
+
+- (void)startTestRecordingForTestClass:(NSString *)testClass method:(NSString *)method
+{
+    [self stopTestRecordingForTestClass:testClass method:method forced:YES];
+
+    NSString *videoFileName = getVideoFileName(self.simulator.UDID, testClass, method);
+
+    NSTask *task = [[NSTask alloc] init];
+    // Launch `xcrun simctl io <simUDID> recordVideo --force --codec=h264 <videoFileName>`
+    [task setLaunchPath:@"/usr/bin/xcrun"];
+    [task setArguments:@[@"simctl", @"io",
+                         [self.simulator UDID],
+                         @"recordVideo",
+                         @"--force",
+                         @"--codec=h264",
+                         videoFileName]];
+    NSLog(@"> %@ %@", [task launchPath], [[task arguments] componentsJoinedByString:@" "]);
+    self.recordVideoTasks[videoFileName] = task;
+    [task launch];
+    [BPUtils printInfo:INFO withString:@" Started recording video to file %@", videoFileName];
+}
+
+- (void)stopTestRecordingForTestClass:(NSString *)testClass method:(NSString *)method forced:(BOOL)forced
+{
+    NSString *videoFileName = getVideoFileName(self.simulator.UDID, testClass, method);
+    NSTask *task = self.recordVideoTasks[videoFileName];
+    if (task != nil) {
+        NSString *logMessage = [NSString stringWithFormat:@"Stopping Video Recording Task.\n Task arguments were: %@.",
+        [task.arguments componentsJoinedByString:@" "]];
+        if (forced) {
+            [BPUtils printInfo:WARNING withString:@"%@", logMessage];
+        } else {
+            [BPUtils printInfo:INFO withString:@"%@", logMessage];
+        }
+
+        [task interrupt];
+        self.recordVideoTasks[videoFileName] = nil;
     }
 }
 
 - (id)_XCT_testCaseDidFailForTestClass:(NSString *)testClass method:(NSString *)method withMessage:(NSString *)message file:(NSString *)file line:(NSNumber *)line {
     [BPUtils printInfo:DEBUGINFO withString:@"BPTestBundleConnection_XCT_testCaseDidFailForTestClass: %@, method: %@, withMessage: %@, file: %@, line: %@", testClass, method, message, file, line];
-    [self stopTestRecording];
+    [self stopTestRecordingForTestClass:testClass method:method forced:NO];
     return nil;
 }
 
@@ -322,7 +348,7 @@ static const NSString * const testManagerEnv = @"TESTMANAGERD_SIM_SOCK";
 
 - (id)_XCT_testCaseDidFinishForTestClass:(NSString *)testClass method:(NSString *)method withStatus:(NSString *)statusString duration:(NSNumber *)duration {
     [BPUtils printInfo:DEBUGINFO withString: @"BPTestBundleConnection_XCT_testCaseDidFinishForTestClass: %@, method: %@, withStatus: %@, duration: %@", testClass, method, statusString, duration];
-    [self stopTestRecording];
+    [self stopTestRecordingForTestClass:testClass method:method forced:NO];
     return nil;
 }
 
